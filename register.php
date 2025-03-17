@@ -8,47 +8,78 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $password = $_POST["password"];
     $profile_picture = $_FILES["profile_picture"];
 
+    // Validate and sanitize user input
+    $username = htmlspecialchars($username, ENT_QUOTES, 'UTF-8');
+    $email = filter_var($email, FILTER_SANITIZE_EMAIL);
+    
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        echo "<p style='color:red;'>Invalid email format.</p>";
+        exit();
+    }
+
+    if (empty($username) || empty($email) || empty($password)) {
+        echo "<p style='color:red;'>All fields are required.</p>";
+        exit();
+    }
+
     // Validate file upload
     $allowed_types = ['image/jpeg', 'image/png'];
     $max_size = 5 * 1024 * 1024; // 5MB
 
-    if (!in_array($profile_picture["type"], $allowed_types)) {
+    $file_info = finfo_open(FILEINFO_MIME_TYPE);
+    $mime_type = finfo_file($file_info, $profile_picture["tmp_name"]);
+    finfo_close($file_info);
+
+    $file_extension = strtolower(pathinfo($profile_picture["name"], PATHINFO_EXTENSION));
+    $valid_extensions = ['jpg', 'jpeg', 'png'];
+
+    if (!in_array($mime_type, $allowed_types) || !in_array($file_extension, $valid_extensions)) {
         echo "<p style='color:red;'>Only JPG and PNG files are allowed.</p>";
-    } elseif ($profile_picture["size"] > $max_size) {
+        exit();
+    }
+
+    if ($profile_picture["size"] > $max_size) {
         echo "<p style='color:red;'>File size must be less than 5MB.</p>";
-    } else {
-        // Hash the password
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+        exit();
+    }
 
-        // Save profile picture
-        $upload_dir = "uploads/";
-        if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0777, true); // Create directory if not exists
+    // Hash the password
+    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+    // Save profile picture securely
+    $upload_dir = "uploads/";
+    if (!is_dir($upload_dir)) {
+        mkdir($upload_dir, 0777, true); // Create directory if not exists
+    }
+    $file_name = uniqid('', true) . "." . $file_extension; // Unique filename
+    $file_path = $upload_dir . $file_name;
+
+    if (move_uploaded_file($profile_picture["tmp_name"], $file_path)) {
+        // Use prepared statements for SQL injection prevention
+        $stmt = $conn->prepare("INSERT INTO users (username, email, password, profile_picture) VALUES (?, ?, ?, ?)");
+        if (!$stmt) {
+            echo "<p style='color:red;'>Error preparing statement.</p>";
+            exit();
         }
-        $file_extension = pathinfo($profile_picture["name"], PATHINFO_EXTENSION);
-        $file_name = uniqid() . "." . $file_extension; // Unique filename
-        $file_path = $upload_dir . $file_name;
 
-        if (move_uploaded_file($profile_picture["tmp_name"], $file_path)) {
-            // Insert into database
-            $stmt = $conn->prepare("INSERT INTO users (username, email, password, profile_picture) VALUES (?, ?, ?, ?)");
-            $stmt->bind_param("ssss", $username, $email, $hashed_password, $file_name);
+        $stmt->bind_param("ssss", $username, $email, $hashed_password, $file_name);
 
-            if ($stmt->execute()) {
-                echo "<p style='color:green;'>Registration successful!</p>";
-                header("Location: login.php");
-            } else {
-                echo "<p style='color:red;'>Error: " . $stmt->error . "</p>";
-            }
-            $stmt->close();
+        if ($stmt->execute()) {
+            echo "<p style='color:green;'>Registration successful!</p>";
+            header("Location: login.php");
+            exit();
         } else {
-            echo "<p style='color:red;'>Failed to upload profile picture.</p>";
+            echo "<p style='color:red;'>Error: " . $stmt->error . "</p>";
         }
+        $stmt->close();
+    } else {
+        echo "<p style='color:red;'>Failed to upload profile picture.</p>";
     }
 }
 
 $conn->close();
 ?>
+
 
 <!DOCTYPE html>
 <html>
